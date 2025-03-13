@@ -11,6 +11,13 @@ def pollard_rho(n, max_iterations=100000, callback=None):
     """
     Implement Pollard's Rho algorithm for integer factorization.
     
+    Algorithm explanation:
+    1. The algorithm uses a cycle-finding method to detect factors
+    2. It uses a function f(x) = (x² + c) mod n which generates a pseudo-random sequence
+    3. Two variables (tortoise and hare) move at different speeds through this sequence
+    4. When they collide (enter a cycle), we compute gcd(|tortoise-hare|, n)
+    5. If gcd is not 1 or n, it's a non-trivial factor of n
+    
     Args:
         n: Number to factorize.
         max_iterations: Maximum iterations to try.
@@ -22,45 +29,49 @@ def pollard_rho(n, max_iterations=100000, callback=None):
     if callback:
         callback("start", f"Starting Pollard's Rho factorization for n = {n}")
     
+    # Check if n is even (simple case)
     if n % 2 == 0:
         if callback:
             callback("found", f"Number is even, 2 is a factor")
         return 2
     
+    # Function to generate sequence: f(x) = (x² + c) mod n
     def f(x, c, n):
         return (x*x + c) % n
     
+    # Try different values of c for the polynomial f(x) = x² + c mod n
     for c in range(1, 20):
         if callback:
             callback("iteration", f"Trying with polynomial f(x) = x² + {c} mod {n}")
         
-        x, y, d = 2, 2, 1
+        # Initialize tortoise and hare to the same position
+        x, y, d = 2, 2, 1  # x is tortoise, y is hare
         iterations = 0
-        tortoise_values = []
-        hare_values = []
         
         while d == 1 and iterations < max_iterations:
-            x_old, y_old = x, y
+            # Move tortoise one step
             x = f(x, c, n)
-            y = f(f(y, c, n), c, n)
+            
+            # Move hare two steps
+            y = f(y, c, n)
+            y = f(y, c, n)
+            
+            # Check if we found a factor
             d = gcd(abs(x - y), n)
             
-            tortoise_values.append(x_old)
-            hare_values.append(y_old)
-            
+            # Periodically report progress
             if callback and iterations % 100 == 0:
                 callback("progress", {
                     "iteration": iterations,
                     "tortoise": x,
                     "hare": y,
                     "gcd": d,
-                    "c": c,
-                    "tortoise_values": tortoise_values[-5:],
-                    "hare_values": hare_values[-5:]
+                    "c": c
                 })
             
             iterations += 1
         
+        # Report results of this attempt
         if callback:
             if d == 1:
                 callback("failed", f"Failed to find factor with c = {c} after {iterations} iterations")
@@ -69,9 +80,11 @@ def pollard_rho(n, max_iterations=100000, callback=None):
             else:
                 callback("success", f"Found non-trivial factor: {d}")
         
+        # If we found a non-trivial factor, return it
         if 1 < d < n:
             return d
     
+    # If we've tried all values of c and found nothing
     if callback:
         callback("failed", "Failed to find any factors after trying all c values")
     return None
@@ -79,6 +92,12 @@ def pollard_rho(n, max_iterations=100000, callback=None):
 def factorize(n, recursive=True, callback=None):
     """
     Factorize n into its prime factors.
+    
+    Strategy:
+    1. First check if n is prime or too small
+    2. Try division by small primes (faster than Pollard's Rho for small factors)
+    3. Use Pollard's Rho algorithm for larger factors
+    4. Recursively factorize the found factors if needed
     
     Args:
         n: Number to factorize.
@@ -105,7 +124,10 @@ def factorize(n, recursive=True, callback=None):
     for i in range(2, 1000):
         if n % i == 0:
             if callback:
-                callback("factor", f"Found small prime factor: {i}")
+                callback("factor", {
+                    "message": f"Found small prime factor: {i}",
+                    "explanation": "Trial division found a factor"
+                })
             if recursive:
                 left = factorize(i, recursive, callback)
                 right = factorize(n // i, recursive, callback)
@@ -119,7 +141,10 @@ def factorize(n, recursive=True, callback=None):
     factor = pollard_rho(n, callback=callback)
     if factor:
         if callback:
-            callback("factor", f"Pollard's Rho found factor: {factor}")
+            callback("factor", {
+                "message": f"Pollard's Rho found factor: {factor}",
+                "explanation": "Using cycle detection to find larger factors"
+            })
         if recursive:
             left = factorize(factor, recursive, callback)
             right = factorize(n // factor, recursive, callback)
@@ -132,7 +157,14 @@ def factorize(n, recursive=True, callback=None):
     return [n]
 
 def is_prime(n):
-    """Simple primality test."""
+    """
+    Simple primality test using trial division.
+    
+    This function checks if a number is prime by:
+    1. Eliminating simple cases (n ≤ 1, n = 2 or 3)
+    2. Checking if n is divisible by 2 or 3
+    3. Checking divisibility by 6k±1 up to √n
+    """
     if n <= 1:
         return False
     if n <= 3:
@@ -159,7 +191,10 @@ def pollard_rho_attack(n, max_iterations=100000, callback=None):
         List of prime factors if found, else None.
     """
     if callback:
-        callback("start", f"Starting Pollard's Rho attack on n = {n}")
+        callback("start", {
+            "message": f"Starting Pollard's Rho attack on n = {n}",
+            "explanation": "This algorithm works best on composite numbers with small factors"
+        })
     
     if n <= 1:
         if callback:
@@ -175,7 +210,10 @@ def pollard_rho_attack(n, max_iterations=100000, callback=None):
     
     if callback:
         if factors and len(factors) > 1:
-            callback("success", f"Successfully factored {n} into {' × '.join(map(str, factors))}")
+            callback("success", {
+                "message": f"Successfully factored {n} into {' × '.join(map(str, factors))}",
+                "factors": factors
+            })
         else:
             callback("failed", "Failed to factor the number")
     

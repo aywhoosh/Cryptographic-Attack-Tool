@@ -13,6 +13,35 @@ from Crypto.Random import get_random_bytes
 from app.ui_component import UIComponent
 from attacks.aes.attack import aes_attack, demonstrate_aes_attack
 
+class Tooltip:
+    """Simple tooltip class for tkinter widgets"""
+    def __init__(self, widget, text):
+        self.widget = widget
+        self.text = text
+        self.tooltip = None
+        self.widget.bind("<Enter>", self.show_tooltip)
+        self.widget.bind("<Leave>", self.hide_tooltip)
+    
+    def show_tooltip(self, event=None):
+        x, y, _, _ = self.widget.bbox("insert")
+        x += self.widget.winfo_rootx() + 25
+        y += self.widget.winfo_rooty() + 25
+        
+        # Create a toplevel window
+        self.tooltip = tk.Toplevel(self.widget)
+        self.tooltip.wm_overrideredirect(True)
+        self.tooltip.wm_geometry(f"+{x}+{y}")
+        
+        label = tk.Label(self.tooltip, text=self.text, justify=tk.LEFT,
+                        background="#ffffff", relief="solid", borderwidth=1,
+                        wraplength=400, padx=4, pady=4)
+        label.pack()
+    
+    def hide_tooltip(self, event=None):
+        if self.tooltip:
+            self.tooltip.destroy()
+            self.tooltip = None
+
 class AESComponent(UIComponent):
     def __init__(self, parent, app):
         super().__init__(parent, app)
@@ -55,27 +84,54 @@ class AESComponent(UIComponent):
         self.block_size_var = tk.StringVar(value="16")
         tk.OptionMenu(input_frame, self.block_size_var, "16", "32").grid(row=6, column=1, sticky=tk.W)
         
+        # Buttons - MOVED HERE between input parameters and visualization
+        btn_frame = tk.Frame(self.inner_frame)
+        btn_frame.pack(fill=tk.X, padx=5, pady=10)
+        self.create_button(btn_frame, "Run Padding Oracle Attack", self.run_aes_attack,
+                           bg='#3a7ebf', fg='white').pack(side=tk.LEFT, padx=5)
+        self.create_button(btn_frame, "Run Demo Attack", self.run_aes_demo,
+                           bg='#4caf50', fg='white').pack(side=tk.LEFT, padx=5)
+        self.create_button(btn_frame, "Generate Sample Data", self.generate_aes_sample,
+                           bg='#ff9800', fg='white').pack(side=tk.LEFT, padx=5)
+        self.create_button(btn_frame, "Clear Fields", self.clear_fields,
+                           bg='#f44336', fg='white').pack(side=tk.LEFT, padx=5)
+        
         # Visualization frame
-        visual_frame = tk.LabelFrame(self.inner_frame, text="Visualization", padx=10, pady=10)
-        visual_frame.pack(fill=tk.X, padx=5, pady=5)
+        title_frame = tk.Frame(self.inner_frame)
+        title_frame.pack(fill=tk.X, padx=5, pady=(10, 0))
         
-        # Add explanation text
+        # Create a frame for the visualization title and help icon
+        visual_title_frame = tk.Frame(title_frame)
+        visual_title_frame.pack(side=tk.LEFT)
+        
+        tk.Label(visual_title_frame, text="Visualization", font=('Arial', 10, 'bold')).pack(side=tk.LEFT)
+        
+        # Create a "?" help button with tooltip
+        help_button = tk.Label(visual_title_frame, text="?", font=('Arial', 10), 
+                               width=2, height=1, relief=tk.RAISED, borderwidth=1)
+        help_button.pack(side=tk.LEFT, padx=5)
+        
+        # Explanation text converted to tooltip
         explanation_text = """
-        AES-CBC Padding Oracle Attack Visualization
-        ----------------------------------------
-        Each block represents 16 bytes of data:
-        - IV (Blue): Initialization Vector
-        - Data Blocks (Light Blue): Encrypted blocks
-        - Last Block (Orange): Contains padding
+AES-CBC Padding Oracle Attack Visualization
+----------------------------------------
+Each block represents 16 bytes of data:
+- IV (Blue): Initialization Vector
+- Data Blocks (Light Blue): Encrypted blocks
+- Last Block (Orange): Contains padding
+
+During the attack:
+- Yellow: Currently testing byte
+- Green: Successfully recovered byte
+- Red: Failed to recover byte (using fallback)
+
+Progress shows both overall completion and current byte recovery status.
+"""
+        # Create tooltip for the help button
+        Tooltip(help_button, explanation_text)
         
-        During the attack:
-        - Yellow: Currently testing byte
-        - Green: Successfully recovered byte
-        - Red: Failed to recover byte (using fallback)
-        
-        Progress shows both overall completion and current byte recovery status.
-        """
-        tk.Label(visual_frame, text=explanation_text, justify=tk.LEFT).pack(fill=tk.X, padx=5)
+        visual_frame = tk.LabelFrame(self.inner_frame, text="", padx=10, pady=10)
+        visual_frame.pack(fill=tk.X, padx=5, pady=5)
         
         self.aes_canvas = tk.Canvas(visual_frame, width=900, height=200, bg='white')
         self.aes_canvas.pack(fill=tk.X, padx=5, pady=5)
@@ -100,23 +156,11 @@ class AESComponent(UIComponent):
         self.byte_progress = ttk.Progressbar(progress_frame, length=400, mode='determinate')
         self.byte_progress.grid(row=1, column=1, sticky=tk.EW, padx=5)
         progress_frame.columnconfigure(1, weight=1)
-        
-        # Buttons
-        btn_frame = tk.Frame(self.inner_frame)
-        btn_frame.pack(fill=tk.X, padx=5, pady=10)
-        self.create_button(btn_frame, "Run Padding Oracle Attack", self.run_aes_attack,
-                           bg='#3a7ebf', fg='white').pack(side=tk.LEFT, padx=5)
-        self.create_button(btn_frame, "Run Demo Attack", self.run_aes_demo,
-                           bg='#4caf50', fg='white').pack(side=tk.LEFT, padx=5)
-        self.create_button(btn_frame, "Generate Sample Data", self.generate_aes_sample,
-                           bg='#ff9800', fg='white').pack(side=tk.LEFT, padx=5)
-        self.create_button(btn_frame, "Clear Fields", self.clear_fields,
-                           bg='#f44336', fg='white').pack(side=tk.LEFT, padx=5)
-        
+
         # Results frame with detailed information
         results_frame = tk.LabelFrame(self.inner_frame, text="Results", padx=10, pady=10)
         results_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
+
         # Add explanation for the results
         tk.Label(results_frame, text="Attack Progress and Results:", anchor=tk.W).pack(fill=tk.X, padx=5)
         self.aes_result = self.create_scrolled_text(results_frame, height=12)
@@ -197,16 +241,24 @@ class AESComponent(UIComponent):
             
             if recovered:
                 try:
-                    result_text = recovered.decode('utf-8', errors='replace')
+                    # Try to unpad the recovered plaintext
+                    unpadded = unpad(recovered, block_size)
+                    result_text = unpadded.decode('utf-8', errors='replace')
                     self.aes_result.insert(tk.END, f"Decrypted plaintext:\n{result_text}\n\n")
-                except UnicodeDecodeError:
-                    self.aes_result.insert(tk.END, f"Decrypted data (hex):\n{recovered.hex()}\n\n")
+                except ValueError:
+                    # If unpadding fails, show as is
+                    try:
+                        result_text = recovered.decode('utf-8', errors='replace')
+                        self.aes_result.insert(tk.END, f"Decrypted data (may include padding):\n{result_text}\n\n")
+                    except UnicodeDecodeError:
+                        self.aes_result.insert(tk.END, f"Decrypted data (hex):\n{recovered.hex()}\n\n")
                 self.aes_result.insert(tk.END, f"Raw bytes: {recovered}\n")
                 self.aes_result.insert(tk.END, f"Attack completed in {elapsed_time:.2f} seconds\n")
                 self.aes_result.insert(tk.END, f"Processed {len(ciphertext)} bytes in {len(ciphertext)//block_size} blocks")
                 self.update_status(f"AES attack completed successfully in {elapsed_time:.2f} seconds")
             else:
-                self.aes_result.insert(tk.END, "Attack failed - could not decrypt data")
+                self.aes_result.insert(tk.END, "Attack failed - could not decrypt data\n")
+                self.aes_result.insert(tk.END, "This could be due to inconsistent oracle responses or invalid padding.\n")
                 self.update_status("AES attack failed")
         except Exception as e:
             messagebox.showerror("Error", str(e))

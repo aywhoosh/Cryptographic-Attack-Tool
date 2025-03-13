@@ -3,7 +3,6 @@ RSA Attack UI Components
 """
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
-import binascii
 import time
 import threading
 
@@ -120,14 +119,31 @@ class RSAComponent(UIComponent):
         pr_frame = ttk.Frame(self.rsa_notebook)
         self.rsa_notebook.add(pr_frame, text="Pollard Rho")
         
-        desc_frame = tk.LabelFrame(pr_frame, text="Description", padx=10, pady=10)
+        # Add scrollable container
+        canvas = tk.Canvas(pr_frame)
+        scrollbar = ttk.Scrollbar(pr_frame, orient=tk.VERTICAL, command=canvas.yview)
+        scroll_frame = ttk.Frame(canvas)
+        
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.create_window((0, 0), window=scroll_frame, anchor=tk.NW)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Description section
+        desc_frame = tk.LabelFrame(scroll_frame, text="Description", padx=10, pady=10)
         desc_frame.pack(fill=tk.X, padx=5, pady=5)
-        desc_text = scrolledtext.ScrolledText(desc_frame, height=3, width=80, wrap=tk.WORD)
+        desc_text = scrolledtext.ScrolledText(desc_frame, height=4, width=80, wrap=tk.WORD)
         desc_text.pack(fill=tk.X, padx=5, pady=5)
-        desc_text.insert(tk.END, """Pollard's rho algorithm is a factorization method useful for finding small factors of large composite numbers. It is particularly effective when N has factors close to sqrt(N).""")
+        desc_text.insert(tk.END, """Pollard's Rho algorithm is a factorization method that uses a pseudo-random sequence to find factors of a composite number. The algorithm works by detecting cycles in this sequence, similar to the Greek letter ρ (rho).
+        
+Key features:
+- Space efficient: Only needs to store a few values
+- Probabilistic: May need multiple attempts
+- Most effective on numbers with small prime factors""")
         desc_text.config(state=tk.DISABLED)
         
-        input_frame = tk.LabelFrame(pr_frame, text="Attack Parameters", padx=10, pady=10)
+        # Input section
+        input_frame = tk.LabelFrame(scroll_frame, text="Attack Parameters", padx=10, pady=10)
         input_frame.pack(fill=tk.X, padx=5, pady=5)
         
         tk.Label(input_frame, text="Number to Factor:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
@@ -139,26 +155,118 @@ class RSAComponent(UIComponent):
         self.pr_iterations.grid(row=1, column=1, sticky=tk.W, padx=5, pady=5)
         self.pr_iterations.insert(0, "10000")
         
-        progress_frame = tk.Frame(pr_frame)
-        progress_frame.pack(fill=tk.X, padx=10, pady=5)
-        self.pr_progress = ttk.Progressbar(progress_frame, orient=tk.HORIZONTAL, mode="indeterminate", length=400)
-        self.pr_progress.pack(side=tk.LEFT, padx=5, pady=5, fill=tk.X, expand=True)
-        self.pr_status = tk.StringVar(value="Ready")
-        tk.Label(progress_frame, textvariable=self.pr_status).pack(side=tk.RIGHT, padx=5)
-        
-        btn_frame = tk.Frame(pr_frame)
+        # Buttons - between attack parameters and visualization
+        btn_frame = tk.Frame(scroll_frame)
         btn_frame.pack(fill=tk.X, padx=5, pady=10)
         self.pr_run_btn = self.create_button(btn_frame, "Run Pollard Rho", self.run_pollard_rho, 
-                                              bg="#3a7ebf", fg="white")
+                                           bg="#3a7ebf", fg="white")
         self.pr_run_btn.pack(side=tk.LEFT, padx=5)
         self.create_button(btn_frame, "Generate Example", self.generate_pollard_rho_example,
-                           bg="#4caf50", fg="white").pack(side=tk.LEFT, padx=5)
+                          bg="#4caf50", fg="white").pack(side=tk.LEFT, padx=5)
         
-        results_frame = tk.LabelFrame(pr_frame, text="Results", padx=10, pady=10)
+        # Visualization section - Completely redesigned with multiple parts
+        vis_frame = tk.LabelFrame(scroll_frame, text="Algorithm Visualization", padx=10, pady=10)
+        vis_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        # Progress indicator
+        progress_frame = tk.Frame(vis_frame)
+        progress_frame.pack(fill=tk.X, pady=5)
+        
+        self.pr_status = tk.StringVar(value="Ready")
+        tk.Label(progress_frame, textvariable=self.pr_status, width=70, anchor="w").pack(side=tk.LEFT, padx=5)
+        
+        self.pr_iteration_label = tk.StringVar(value="Iteration: 0")
+        tk.Label(progress_frame, textvariable=self.pr_iteration_label).pack(side=tk.RIGHT, padx=5)
+        
+        # Canvas for main visualization
+        self.pr_canvas = tk.Canvas(vis_frame, width=800, height=250, bg='white', highlightthickness=1, highlightbackground="#cccccc")
+        self.pr_canvas.pack(fill=tk.X, padx=5, pady=5)
+        
+        # Step navigation controls
+        step_control_frame = tk.Frame(vis_frame)
+        step_control_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        # Store visualization state
+        self.visualization_history = []
+        self.current_step = 0
+        self._auto_play_id = None
+        
+        # Detailed iteration info
+        self.iter_info_frame = tk.LabelFrame(vis_frame, text="Current Iteration Details", padx=10, pady=10)
+        self.iter_info_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        detail_grid = tk.Frame(self.iter_info_frame)
+        detail_grid.pack(fill=tk.X, padx=5, pady=5)
+        
+        # Row 1: Function and values
+        tk.Label(detail_grid, text="Function:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=2)
+        self.pr_function = tk.StringVar(value="f(x) = x² + c mod n")
+        tk.Label(detail_grid, textvariable=self.pr_function, width=30).grid(row=0, column=1, sticky=tk.W, padx=5, pady=2)
+        
+        tk.Label(detail_grid, text="Constant c:").grid(row=0, column=2, sticky=tk.W, padx=5, pady=2)
+        self.pr_c_value = tk.StringVar(value="1")
+        tk.Label(detail_grid, textvariable=self.pr_c_value, width=10).grid(row=0, column=3, sticky=tk.W, padx=5, pady=2)
+        
+        # Row 2: Tortoise and Hare
+        tk.Label(detail_grid, text="Tortoise value:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=2)
+        self.pr_tortoise = tk.StringVar(value="0")
+        tk.Label(detail_grid, textvariable=self.pr_tortoise).grid(row=1, column=1, sticky=tk.W, padx=5, pady=2)
+        
+        tk.Label(detail_grid, text="Hare value:").grid(row=1, column=2, sticky=tk.W, padx=5, pady=2)
+        self.pr_hare = tk.StringVar(value="0")
+        tk.Label(detail_grid, textvariable=self.pr_hare).grid(row=1, column=3, sticky=tk.W, padx=5, pady=2)
+        
+        # Row 3: GCD calculation
+        tk.Label(detail_grid, text="GCD Calculation:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=2)
+        self.pr_gcd_calc = tk.StringVar(value="gcd(|T-H|, n) = gcd(0, n) = n")
+        tk.Label(detail_grid, textvariable=self.pr_gcd_calc, width=40).grid(row=2, column=1, columnspan=3, sticky=tk.W, padx=5, pady=2)
+        
+        # Step navigation controls
+        self.step_first_btn = tk.Button(step_control_frame, text="⏮ First", command=self.visualization_first_step, state=tk.DISABLED)
+        self.step_first_btn.pack(side=tk.LEFT, padx=2)
+        
+        self.step_prev_btn = tk.Button(step_control_frame, text="◀ Previous", command=self.visualization_prev_step, state=tk.DISABLED)
+        self.step_prev_btn.pack(side=tk.LEFT, padx=2)
+        
+        # Step indicator
+        self.step_indicator = tk.StringVar(value="Step 0/0")
+        step_label = tk.Label(step_control_frame, textvariable=self.step_indicator, width=15)
+        step_label.pack(side=tk.LEFT, padx=10)
+        
+        self.step_next_btn = tk.Button(step_control_frame, text="Next ▶", command=self.visualization_next_step, state=tk.DISABLED)
+        self.step_next_btn.pack(side=tk.LEFT, padx=2)
+        
+        self.step_last_btn = tk.Button(step_control_frame, text="Last ⏭", command=self.visualization_last_step, state=tk.DISABLED)
+        self.step_last_btn.pack(side=tk.LEFT, padx=2)
+        
+        # Auto-play controls
+        auto_frame = tk.Frame(step_control_frame)
+        auto_frame.pack(side=tk.RIGHT, padx=10)
+        
+        self.auto_play_var = tk.BooleanVar(value=False)
+        self.auto_play_btn = tk.Button(auto_frame, text="▶ Auto-Play", command=self.toggle_auto_play, state=tk.DISABLED)
+        self.auto_play_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Speed control
+        tk.Label(auto_frame, text="Speed:").pack(side=tk.LEFT)
+        self.speed_var = tk.DoubleVar(value=1.0)
+        speed_scale = ttk.Scale(auto_frame, variable=self.speed_var, from_=0.1, to=3.0, length=100)
+        speed_scale.pack(side=tk.LEFT, padx=5)
+        
+        # Results section
+        results_frame = tk.LabelFrame(scroll_frame, text="Results", padx=10, pady=10)
         results_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
         self.pr_result = self.create_scrolled_text(results_frame, height=10)
         self.pr_result.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-    
+        
+        # Progress bar below results
+        self.pr_progress = ttk.Progressbar(results_frame, orient=tk.HORIZONTAL, mode="determinate")
+        self.pr_progress.pack(fill=tk.X, padx=5, pady=5)
+        
+        # Configure scrolling
+        scroll_frame.bind('<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+
     def run_wiener_attack(self):
         """Run Wiener's attack with the provided parameters"""
         try:
@@ -338,93 +446,212 @@ class RSAComponent(UIComponent):
             messagebox.showerror("Error", str(e))
             self.update_status("Error generating example")
 
-    def setup_pollard_rho_tab(self):
-        """Set up the Pollard Rho factorization tab"""
-        pr_frame = ttk.Frame(self.rsa_notebook)
-        self.rsa_notebook.add(pr_frame, text="Pollard Rho")
+    def pollard_rho_callback(self, status, data):
+        """Callback to handle Pollard's Rho algorithm progress"""
+        # This runs in a background thread, so schedule UI updates on the main thread
+        if status == "progress" and isinstance(data, dict):
+            # Make a deep copy to avoid data race issues
+            history_item = {key: data[key] for key in data}
+            
+            # Add step number to easily track steps
+            history_item["step_number"] = len(self.visualization_history) + 1
+            
+            # Store in visualization history
+            self.visualization_history.append(history_item)
+            
+            # Update UI on the main thread
+            step_num = len(self.visualization_history)
+            self.root.after(0, lambda: self.update_step_counter(step_num))
+            self.root.after(0, lambda: self.update_progress_bar(step_num))
+            
+            # If this is a factor-found step, highlight it
+            if "gcd" in data and data.get("n", 1) > data.get("gcd", 1) > 1:
+                self.root.after(0, lambda: self.highlight_factor_found(step_num, data))
         
-        # Add scrollable container
-        canvas = tk.Canvas(pr_frame)
-        scrollbar = ttk.Scrollbar(pr_frame, orient=tk.VERTICAL, command=canvas.yview)
-        scroll_frame = ttk.Frame(canvas)
-        
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        canvas.create_window((0, 0), window=scroll_frame, anchor=tk.NW)
-        canvas.configure(yscrollcommand=scrollbar.set)
-        
-        # Description section
-        desc_frame = tk.LabelFrame(scroll_frame, text="Description", padx=10, pady=10)
-        desc_frame.pack(fill=tk.X, padx=5, pady=5)
-        desc_text = scrolledtext.ScrolledText(desc_frame, height=4, width=80, wrap=tk.WORD)
-        desc_text.pack(fill=tk.X, padx=5, pady=5)
-        desc_text.insert(tk.END, """Pollard's Rho algorithm is a factorization method that uses a pseudo-random sequence to find factors of a composite number. The algorithm works by detecting cycles in this sequence, similar to the Greek letter ρ (rho).
+        self.root.after(0, lambda: self.update_pollard_rho_progress(status, data))
 
-Key features:
-- Space efficient: Only needs to store a few values
-- Probabilistic: May need multiple attempts
-- Most effective on numbers with small prime factors""")
-        desc_text.config(state=tk.DISABLED)
+    def update_progress_bar(self, steps_completed):
+        """Update the progress bar based on steps completed"""
+        try:
+            max_iter = int(self.pr_iterations.get())
+            progress = min(100, (steps_completed / max_iter) * 100)
+            self.pr_progress['value'] = progress
+        except (ValueError, ZeroDivisionError):
+            self.pr_progress['value'] = 0
+
+    def update_step_counter(self, step_num):
+        """Update the step counter display"""
+        self.current_step = step_num
+        self.step_indicator.set(f"Step {step_num}/{step_num}")
+        self.enable_step_controls()
+
+    def highlight_factor_found(self, step_num, data):
+        """Highlight when a factor is found"""
+        gcd = data.get("gcd", 0)
+        n = data.get("n", 1)
+        if 1 < gcd < n:
+            # Add special highlighting to results
+            self.pr_result.insert(tk.END, f"\n🌟 FACTOR FOUND at step {step_num}: {gcd} is a factor of {n} 🌟\n", "success")
+            self.pr_result.see(tk.END)
+            
+            # Jump to this step in visualization
+            self.current_step = step_num
+            self.step_indicator.set(f"Step {step_num}/{step_num}")
+            self.render_visualization_step(data)
+
+    def render_visualization_step(self, data):
+        """Render a visualization step with detailed information"""
+        if not data:
+            return
         
-        # Input section
-        input_frame = tk.LabelFrame(scroll_frame, text="Attack Parameters", padx=10, pady=10)
-        input_frame.pack(fill=tk.X, padx=5, pady=5)
+        # Clear previous visualization
+        self.pr_canvas.delete("all")
         
-        tk.Label(input_frame, text="Number to Factor:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
-        self.pr_n = tk.Entry(input_frame, width=60)
-        self.pr_n.grid(row=0, column=1, sticky=tk.W, padx=5, pady=5)
+        # Extract data from the current step
+        iteration = data.get("iteration", 0)
+        tortoise = data.get("tortoise", 0)
+        hare = data.get("hare", 0)
+        gcd = data.get("gcd", 0)
+        c = data.get("c", 0)
+        n = data.get("n", 0)
+        history = data.get("history", [])
         
-        tk.Label(input_frame, text="Maximum Iterations:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
-        self.pr_iterations = tk.Entry(input_frame, width=20)
-        self.pr_iterations.grid(row=1, column=1, sticky=tk.W, padx=5, pady=5)
-        self.pr_iterations.insert(0, "10000")
+        # Update status and iteration information
+        self.pr_iteration_label.set(f"Iteration: {iteration}")
+        self.pr_status.set(f"Computing GCD({abs(tortoise-hare)}, {n}) = {gcd}")
         
-        # Progress section
-        progress_frame = tk.LabelFrame(scroll_frame, text="Progress", padx=10, pady=10)
-        progress_frame.pack(fill=tk.X, padx=5, pady=5)
+        # Update detailed information
+        self.pr_function.set(f"f(x) = x² + {c} mod {n}")
+        self.pr_c_value.set(f"{c}")
+        self.pr_tortoise.set(f"{tortoise}")
+        self.pr_hare.set(f"{hare}")
+        self.pr_gcd_calc.set(f"gcd(|{tortoise}-{hare}|, {n}) = gcd({abs(tortoise-hare)}, {n}) = {gcd}")
         
-        self.pr_iteration_label = tk.StringVar(value="Current iteration: 0")
-        tk.Label(progress_frame, textvariable=self.pr_iteration_label).pack(fill=tk.X, padx=5)
+        # Calculate canvas dimensions
+        width = self.pr_canvas.winfo_width() or 800
+        height = self.pr_canvas.winfo_height() or 250
         
-        self.pr_progress = ttk.Progressbar(progress_frame, orient=tk.HORIZONTAL, mode="determinate", length=400)
-        self.pr_progress.pack(fill=tk.X, padx=5, pady=5)
+        # Draw title and explanation
+        self.pr_canvas.create_text(width//2, 20, text=f"Pollard's Rho - Step {self.current_step}/{len(self.visualization_history)}", 
+                               font=("Arial", 12, "bold"))
         
-        self.pr_status = tk.StringVar(value="Ready")
-        tk.Label(progress_frame, textvariable=self.pr_status).pack(fill=tk.X, padx=5)
+        # Draw state machine diagram - circles representing sequence states
+        circle_y = height // 2
+        circle_radius = 30
+        center_x = width // 2
+        max_circles = min(15, len(history) + 1)  # Limit to prevent overcrowding
         
-        # Visual trace section
-        visual_frame = tk.LabelFrame(scroll_frame, text="Algorithm Trace", padx=10, pady=10)
-        visual_frame.pack(fill=tk.X, padx=5, pady=5)
+        # Calculate the sequence values to show (most recent ones)
+        if history and len(history) > 0:
+            show_history = history[-max_circles:] if len(history) > max_circles else history
+            
+            # Draw sequence elements as a chain
+            seq_start_x = center_x - ((len(show_history) - 1) * circle_radius)
+            
+            # First, draw the connecting lines between nodes
+            for i in range(len(show_history) - 1):
+                x1 = seq_start_x + i * 2 * circle_radius
+                x2 = x1 + 2 * circle_radius
+                
+                # Draw standard connection
+                self.pr_canvas.create_line(x1 + circle_radius, circle_y, x2 - circle_radius, circle_y, 
+                                       arrow=tk.LAST, width=2)
+            
+            # Then draw the nodes themselves (to appear on top of lines)
+            for i, step in enumerate(show_history):
+                x = seq_start_x + i * 2 * circle_radius
+                
+                # For tortoise positions
+                t_value = step.get("tortoise", 0)
+                t_color = "#90EE90"  # Light green
+                
+                # Special coloring for the current tortoise
+                if i == len(show_history) - 1:
+                    t_color = "#3CB371"  # Medium sea green
+                
+                # Draw tortoise circle
+                self.pr_canvas.create_oval(x - circle_radius, circle_y - 50 - circle_radius, 
+                                       x + circle_radius, circle_y - 50 + circle_radius, 
+                                       fill=t_color, outline="black")
+                self.pr_canvas.create_text(x, circle_y - 50, text=f"{t_value}", font=("Arial", 10))
+                self.pr_canvas.create_text(x, circle_y - 50 - circle_radius - 10, text="Tortoise", font=("Arial", 8))
+                
+                # For hare positions (offset below)
+                h_value = step.get("hare", 0)
+                h_color = "#FFB6C1"  # Light pink
+                
+                # Special coloring for the current hare
+                if i == len(show_history) - 1:
+                    h_color = "#FF6347"  # Tomato
+                
+                # Draw hare circle
+                self.pr_canvas.create_oval(x - circle_radius, circle_y + 50 - circle_radius, 
+                                       x + circle_radius, circle_y + 50 + circle_radius, 
+                                       fill=h_color, outline="black")
+                self.pr_canvas.create_text(x, circle_y + 50, text=f"{h_value}", font=("Arial", 10))
+                self.pr_canvas.create_text(x, circle_y + 50 + circle_radius + 10, text="Hare", font=("Arial", 8))
         
-        self.pr_canvas = tk.Canvas(visual_frame, width=800, height=200, bg='white')
-        self.pr_canvas.pack(fill=tk.X, padx=5, pady=5)
+        # Add additional information and GCD calculation
+        info_y = height - 40
+        gcd_color = "green" if 1 < gcd < n else "black"
+        self.pr_canvas.create_text(center_x, info_y, text=f"Current GCD = {gcd}", 
+                               fill=gcd_color, font=("Arial", 11, "bold"))
         
-        # Buttons
-        btn_frame = tk.Frame(scroll_frame)
-        btn_frame.pack(fill=tk.X, padx=5, pady=10)
-        self.pr_run_btn = self.create_button(btn_frame, "Run Pollard Rho", self.run_pollard_rho, 
-                                           bg="#3a7ebf", fg="white")
-        self.pr_run_btn.pack(side=tk.LEFT, padx=5)
-        self.create_button(btn_frame, "Generate Example", self.generate_pollard_rho_example,
-                          bg="#4caf50", fg="white").pack(side=tk.LEFT, padx=5)
+        # Show cycle detection status
+        if 1 < gcd < n:
+            self.pr_canvas.create_text(center_x, info_y + 20, 
+                                   text=f"Factor found! {gcd} is a factor of {n}", 
+                                   fill="green", font=("Arial", 12, "bold"))
         
-        # Results section
-        results_frame = tk.LabelFrame(scroll_frame, text="Results", padx=10, pady=10)
-        results_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        self.pr_result = self.create_scrolled_text(results_frame, height=15)
-        self.pr_result.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        # Configure scrolling
-        scroll_frame.bind('<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        # Force immediate update
+        self.root.update_idletasks()
+
+    def update_pollard_rho_progress(self, status, data):
+        """Update the UI with Pollard's Rho algorithm progress"""
+        try:
+            # Handle message display for different data formats
+            if isinstance(data, dict) and "message" in data:
+                message = data["message"]
+                explanation = data.get("explanation", "")
+                if explanation:
+                    self.pr_result.insert(tk.END, f"{message} - {explanation}\n")
+                else:
+                    self.pr_result.insert(tk.END, f"{message}\n")
+            elif isinstance(data, str):
+                self.pr_result.insert(tk.END, f"{data}\n")
+            
+            # Handle status-specific styling
+            if status == "success":
+                if isinstance(data, dict) and "message" in data:
+                    self.pr_result.insert(tk.END, f"\n{data['message']}\n", "success")
+                else:
+                    self.pr_result.insert(tk.END, f"\n{data}\n", "success")
+                # Update the visualization to the last step
+                self.visualization_last_step()
+                
+            elif status == "failed":
+                if isinstance(data, dict) and "message" in data:
+                    self.pr_result.insert(tk.END, f"\n{data['message']}\n", "error")
+                else:
+                    self.pr_result.insert(tk.END, f"\n{data}\n", "error")
+            
+            self.pr_result.see(tk.END)
+            self.pr_result.tag_config("success", foreground="green", font=("Arial", 10, "bold"))
+            self.pr_result.tag_config("error", foreground="red")
+            
+        except Exception as e:
+            print(f"Visualization error: {e}")
 
     def run_pollard_rho(self):
         """Run Pollard's Rho factorization algorithm"""
         try:
             n_str = self.pr_n.get().strip()
             iterations_str = self.pr_iterations.get().strip()
+            
             if not n_str:
                 messagebox.showerror("Input Error", "Please provide the number to factor")
                 return
+            
             try:
                 n = int(n_str)
                 max_iterations = int(iterations_str) if iterations_str else 10000
@@ -432,131 +659,206 @@ Key features:
                 messagebox.showerror("Input Error", "The number to factor must be a valid integer")
                 return
             
+            # Clean up UI and prepare for run
             self.pr_result.delete(1.0, tk.END)
             self.pr_canvas.delete("all")
             self.pr_status.set("Running Pollard's Rho algorithm...")
             self.pr_progress['value'] = 0
             self.pr_run_btn.config(state=tk.DISABLED)
             
-            def run_attack():
-                start_time = time.time()
-                result = pollard_rho_attack(n, max_iterations=max_iterations, callback=self.pollard_rho_callback)
-                elapsed_time = time.time() - start_time
-                self.root.after(0, lambda: self.update_pollard_rho_results(result, elapsed_time))
+            # Reset visualization history and controls
+            self.visualization_history = []
+            self.current_step = 0
+            self.step_indicator.set("Step 0/0")
+            self.disable_step_controls()
+            self.pr_function.set("f(x) = x² + c mod n")
+            self.pr_c_value.set("0")
+            self.pr_tortoise.set("0")
+            self.pr_hare.set("0")
+            self.pr_gcd_calc.set("gcd(|T-H|, n) = ?")
             
+            def run_attack():
+                try:
+                    start_time = time.time()
+                    
+                    # Display initial state
+                    self.root.after(0, lambda: self.initialize_visualization(n))
+                    
+                    # Run the attack with callback for visualization
+                    result = pollard_rho_attack(n, max_iterations=max_iterations, callback=self.pollard_rho_callback)
+                    elapsed_time = time.time() - start_time
+                    
+                    # Update results when done
+                    self.root.after(0, lambda: self.update_pollard_rho_results(result, elapsed_time))
+                    
+                except Exception as e:
+                    self.root.after(0, lambda: messagebox.showerror("Error", f"Attack error: {str(e)}"))
+                    self.root.after(0, lambda: self.pr_run_btn.config(state=tk.NORMAL))
+            
+            # Run in background thread
             threading.Thread(target=run_attack, daemon=True).start()
+            
         except Exception as e:
             messagebox.showerror("Error", str(e))
             self.pr_status.set("Error occurred")
             self.pr_run_btn.config(state=tk.NORMAL)
             self.update_status("Error occurred during Pollard's Rho factorization")
 
-    def pollard_rho_callback(self, status, data):
-        """Callback to handle Pollard's Rho algorithm progress"""
-        self.root.after(0, lambda: self.update_pollard_rho_progress(status, data))
-
-    def update_pollard_rho_progress(self, status, data):
-        """Update the UI with Pollard's Rho algorithm progress"""
-        if status == "progress":
-            iteration = data.get("iteration", 0)
-            tortoise = data.get("tortoise", 0)
-            hare = data.get("hare", 0)
-            gcd = data.get("gcd", 0)
-            c = data.get("c", 0)
-            
-            # Update progress indicators
-            max_iter = int(self.pr_iterations.get())
-            progress = (iteration / max_iter) * 100
-            self.pr_progress['value'] = progress
-            self.pr_iteration_label.set(f"Iteration {iteration}, using c={c}")
-            
-            # Update visualization
-            self.pr_canvas.delete("all")
-            width = 800
-            height = 200
-            
-            # Draw number line
-            self.pr_canvas.create_line(50, height//2, width-50, height//2)
-            
-            # Draw tortoise and hare positions
-            n = int(self.pr_n.get())
-            tortoise_x = 50 + (tortoise * (width-100)) // n
-            hare_x = 50 + (hare * (width-100)) // n
-            
-            self.pr_canvas.create_oval(tortoise_x-5, height//2-20, tortoise_x+5, height//2-10, fill="green")
-            self.pr_canvas.create_text(tortoise_x, height//2-30, text=f"T={tortoise}")
-            
-            self.pr_canvas.create_oval(hare_x-5, height//2+10, hare_x+5, height//2+20, fill="red")
-            self.pr_canvas.create_text(hare_x, height//2+30, text=f"H={hare}")
-            
-            # Show GCD value
-            self.pr_canvas.create_text(width//2, height-20, text=f"Current GCD = {gcd}")
-            
-        elif status in ["start", "info", "progress"]:
-            self.pr_result.insert(tk.END, f"{data}\n")
-        elif status == "success":
-            self.pr_result.insert(tk.END, f"\n{data}\n", "success")
-        elif status == "failed":
-            self.pr_result.insert(tk.END, f"\n{data}\n", "error")
+    def visualization_first_step(self):
+        """Go to the first step in the visualization"""
+        if not self.visualization_history:
+            return
         
-        self.pr_result.see(tk.END)
-        self.pr_result.tag_config("success", foreground="green")
-        self.pr_result.tag_config("error", foreground="red")
+        self.current_step = 1
+        self.step_indicator.set(f"Step {self.current_step}/{len(self.visualization_history)}")
+        self.render_visualization_step(self.visualization_history[0])
+        self.update_step_buttons()
 
-    def run_pollard_rho(self):
-        """Run Pollard's Rho factorization algorithm"""
-        try:
-            n_str = self.pr_n.get().strip()
-            iterations_str = self.pr_iterations.get().strip()
-            if not n_str:
-                messagebox.showerror("Input Error", "Please provide the number to factor")
-                return
-            try:
-                n = int(n_str)
-                max_iterations = int(iterations_str) if iterations_str else 10000
-            except ValueError:
-                messagebox.showerror("Input Error", "The number to factor must be a valid integer")
-                return
-            
-            self.pr_result.delete(1.0, tk.END)
-            self.pr_status.set("Running Pollard's Rho algorithm...")
-            self.pr_progress.start()
-            self.pr_run_btn.config(state=tk.DISABLED)
-            
-            def run_attack():
-                start_time = time.time()
-                result = pollard_rho_attack(n, max_iterations)
-                elapsed_time = time.time() - start_time
-                self.root.after(0, lambda: self.update_pollard_rho_results(result, elapsed_time))
-            
-            threading.Thread(target=run_attack, daemon=True).start()
-        except Exception as e:
-            messagebox.showerror("Error", str(e))
-            self.pr_status.set("Error occurred")
-            self.pr_progress.stop()
-            self.pr_run_btn.config(state=tk.NORMAL)
-            self.update_status("Error occurred during Pollard's Rho factorization")
-    
+    def visualization_prev_step(self):
+        """Go to the previous step in the visualization"""
+        if not self.visualization_history or self.current_step <= 1:
+            return
+        
+        self.current_step -= 1
+        self.step_indicator.set(f"Step {self.current_step}/{len(self.visualization_history)}")
+        self.render_visualization_step(self.visualization_history[self.current_step - 1])
+        self.update_step_buttons()
+
+    def visualization_next_step(self):
+        """Go to the next step in the visualization"""
+        if not self.visualization_history or self.current_step >= len(self.visualization_history):
+            return
+        
+        self.current_step += 1
+        self.step_indicator.set(f"Step {self.current_step}/{len(self.visualization_history)}")
+        self.render_visualization_step(self.visualization_history[self.current_step - 1])
+        self.update_step_buttons()
+
+    def visualization_last_step(self):
+        """Go to the last step in the visualization"""
+        if not self.visualization_history:
+            return
+        
+        self.current_step = len(self.visualization_history)
+        self.step_indicator.set(f"Step {self.current_step}/{len(self.visualization_history)}")
+        self.render_visualization_step(self.visualization_history[-1])
+        self.update_step_buttons()
+
+    def toggle_auto_play(self):
+        """Toggle auto-play mode for the visualization"""
+        if self.auto_play_var.get():
+            self.auto_play_var.set(False)
+            self.auto_play_btn.config(text="▶ Auto")
+            # Cancel any scheduled auto-play steps
+            if hasattr(self, '_auto_play_id') and self._auto_play_id:
+                try:
+                    self.root.after_cancel(self._auto_play_id)
+                except Exception:
+                    pass  # Handle the case where the ID is invalid
+                self._auto_play_id = None
+        else:
+            self.auto_play_var.set(True)
+            self.auto_play_btn.config(text="⏹ Stop")
+            # Start auto-play
+            self.auto_play_step()
+
+    def auto_play_step(self):
+        """Advance to the next step in auto-play mode"""
+        if not self.auto_play_var.get():
+            return
+        
+        # Go to next step
+        if self.current_step < len(self.visualization_history):
+            self.visualization_next_step()
+            # Calculate delay based on speed setting
+            delay = int(1000 / self.speed_var.get())
+            # Schedule next step
+            self._auto_play_id = self.root.after(delay, self.auto_play_step)
+        else:
+            # Reached the end, stop auto-play
+            self.auto_play_var.set(False)
+            self.auto_play_btn.config(text="▶ Auto")
+
+    def update_step_buttons(self):
+        """Update the state of step buttons based on current position"""
+        if not self.visualization_history:
+            self.disable_step_controls()
+            return
+        
+        # Enable/disable first and previous buttons
+        if self.current_step <= 1:
+            self.step_first_btn.config(state=tk.DISABLED)
+            self.step_prev_btn.config(state=tk.DISABLED)
+        else:
+            self.step_first_btn.config(state=tk.NORMAL)
+            self.step_prev_btn.config(state=tk.NORMAL)
+        
+        # Enable/disable next and last buttons
+        if self.current_step >= len(self.visualization_history):
+            self.step_next_btn.config(state=tk.DISABLED)
+            self.step_last_btn.config(state=tk.DISABLED)
+        else:
+            self.step_next_btn.config(state=tk.NORMAL)
+            self.step_last_btn.config(state=tk.NORMAL)
+        
+        # Always enable auto-play if we have history
+        self.auto_play_btn.config(state=tk.NORMAL)
+
+    def enable_step_controls(self):
+        """Enable step controls when visualization history is available"""
+        if self.visualization_history:
+            self.auto_play_btn.config(state=tk.NORMAL)
+            self.update_step_buttons()
+
+    def disable_step_controls(self):
+        """Disable all step controls"""
+        self.step_first_btn.config(state=tk.DISABLED)
+        self.step_prev_btn.config(state=tk.DISABLED)
+        self.step_next_btn.config(state=tk.DISABLED)
+        self.step_last_btn.config(state=tk.DISABLED)
+        self.auto_play_btn.config(state=tk.DISABLED)
+        self.auto_play_var.set(False)
+
+    def initialize_visualization(self, n):
+        """Initialize the visualization area with a clean slate"""
+        self.pr_canvas.delete("all")
+        width = self.pr_canvas.winfo_width() or 800
+        height = self.pr_canvas.winfo_height() or 250
+        
+        # Draw title and starting text
+        self.pr_canvas.create_text(width//2, height//2, text=f"Initializing Pollard's Rho Algorithm to Factor {n}", 
+                               font=("Arial", 12, "bold"))
+        self.pr_canvas.create_text(width//2, height//2 + 30, text="Algorithm starts with tortoise=2 and hare=2",
+                               font=("Arial", 10))
+        self.pr_canvas.create_text(width//2, height//2 + 60, text="For each step: tortoise = f(tortoise), hare = f(f(hare))",
+                               font=("Arial", 10))
+        
+        # Force update
+        self.root.update_idletasks()
+
     def update_pollard_rho_results(self, result, elapsed_time):
         """Update the UI with Pollard's Rho results"""
-        self.pr_progress.stop()
+        self.pr_progress['value'] = 100
         self.pr_run_btn.config(state=tk.NORMAL)
+        
         if result:
             factors = result
-            self.pr_result.insert(tk.END, f"Factorization successful!\n\n")
+            self.pr_result.insert(tk.END, f"Factorization successful!\n\n", "success")
             self.pr_result.insert(tk.END, f"Number: {self.pr_n.get()}\n")
-            self.pr_result.insert(tk.END, "Factors:\n")
+            self.pr_result.insert(tk.END, "Factors found:\n")
             for i, factor in enumerate(factors, 1):
-                self.pr_result.insert(tk.END, f"  Factor {i}: {factor}\n")
+                self.pr_result.insert(tk.END, f"  Factor {i}: {factor}\n", "factor")
             self.pr_result.insert(tk.END, f"\nFactorization completed in {elapsed_time:.3f} seconds\n")
-            self.pr_status.set("Factorization completed")
-            self.update_status("Pollard's Rho factorization completed successfully")
+            self.pr_result.insert(tk.END, f"Total steps: {len(self.visualization_history)}\n")
+            self.pr_status.set(f"Factorization completed: found {len(factors)} factors")
         else:
-            self.pr_result.insert(tk.END, "Factorization failed. No factors were found.\n")
+            self.pr_result.insert(tk.END, "Factorization failed. No factors were found.\n", "error")
             self.pr_result.insert(tk.END, "Try increasing the maximum iterations or using a different algorithm.\n")
             self.pr_status.set("Factorization failed")
-            self.update_status("Pollard's Rho factorization failed")
-    
+        
+        self.pr_result.tag_config("factor", foreground="blue")
+        self.update_status(f"Pollard Rho completed in {elapsed_time:.2f} seconds")
+
     def generate_pollard_rho_example(self):
         """Generate an example for Pollard's Rho factorization"""
         try:
