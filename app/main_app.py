@@ -17,12 +17,21 @@ class CryptoAttackTool:
         self.root.title("Cryptographic Attack Tool")
         self.root.geometry("1000x700")
         
-        # Set icon if available (Windows only)
+        # Try to load icon from multiple possible locations
+        icon_paths = [
+            "app/assets/icon.ico",
+            "assets/icon.ico",
+            os.path.join(os.path.dirname(__file__), "assets", "icon.ico")
+        ]
+        
         if platform.system() == "Windows":
-            try:
-                self.root.iconbitmap("app/assets/icon.ico")
-            except Exception as e:
-                print("Icon not found:", e)
+            for icon_path in icon_paths:
+                try:
+                    if os.path.exists(icon_path):
+                        self.root.iconbitmap(icon_path)
+                        break
+                except Exception:
+                    continue  # Try next path if current fails
         
         self.configure_style()
         self.create_heading()

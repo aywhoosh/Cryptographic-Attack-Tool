@@ -1,0 +1,241 @@
+# Cryptographic Attack Explanations
+
+This document provides detailed explanations of each cryptographic attack implemented in the Cryptographic Attack Tool.
+
+## 1. RSA Attacks
+
+### 1.1. Wiener's Attack
+
+#### Overview
+Wiener's attack is a mathematical cryptanalytic technique targeting RSA implementations that use a small private exponent (d). Named after Michael J. Wiener who published it in 1990, this attack can efficiently recover the private key when d is sufficiently small relative to the modulus N.
+
+#### Mathematical Foundation
+The attack exploits the fundamental relationship between the public exponent (e) and private exponent (d) in RSA:
+   e·d ≡ 1 (mod φ(n))
+
+This can be rewritten as: 
+   e·d = k·φ(n) + 1 
+   
+For some integer k, which leads to:
+   |e/φ(n) - k/d| < 1/2d²
+
+This means k/d is a convergent in the continued fraction expansion of e/φ(n).
+
+#### Attack Process
+1. Calculate the continued fraction expansion of e/N (using N as an approximation for φ(n))
+2. Test each convergent k/d as a potential solution
+3. For each candidate d, verify if it's the correct private exponent by checking:
+   - p, q = potential prime factors of N derived from d and e
+   - N = p·q and φ(n) = (p-1)·(q-1)
+   - e·d ≡ 1 (mod φ(n))
+
+#### Vulnerability Conditions
+The attack works when:
+- d < N^(1/4)/3 (Wiener's original bound)
+- Modern variants can succeed with slightly larger d
+
+#### Countermeasures
+- Use a sufficiently large private exponent d
+- Apply the Chinese Remainder Theorem (CRT) for efficient decryption even with larger keys
+- Use balanced prime factors (p and q of similar size)
+
+### 1.2. Franklin-Reiter Related Message Attack
+
+#### Overview
+The Franklin-Reiter attack targets RSA when two related messages are encrypted with the same public key. It was discovered by Matthew Franklin and Michael Reiter in 1996.
+
+#### Mathematical Foundation
+The attack relies on polynomial algebra over finite fields, specifically finding the greatest common divisor (GCD) of two polynomials:
+- g₁(x) = x^e - c₁ mod n
+- g₂(x) = (ax + b)^e - c₂ mod n
+
+Where:
+- e is the public exponent
+- c₁ and c₂ are the ciphertexts
+- a and b define the relationship m₂ = a·m₁ + b between the messages
+- n is the RSA modulus
+
+#### Attack Process
+1. Construct the two polynomials g₁(x) and g₂(x)
+2. Calculate the GCD of these polynomials
+3. Find the roots of the resulting GCD polynomial
+4. These roots correspond to the original message m₁
+
+#### Vulnerability Conditions
+- Messages must have a known linear relationship m₂ = a·m₁ + b
+- The public exponent e must be small (typically e=3)
+- Both messages must be encrypted with the same RSA key
+
+#### Countermeasures
+- Use random padding before encryption (PKCS#1)
+- Avoid encrypting related messages
+- Use larger public exponents
+- Implement proper padding schemes like OAEP
+
+### 1.3. Pollard's Rho Algorithm
+
+#### Overview
+Pollard's Rho is an integer factorization algorithm developed by John Pollard in 1975. It's particularly effective at finding small factors of large composite numbers and is often used to attack RSA when the modulus has small prime factors.
+
+#### Mathematical Foundation
+The algorithm uses a pseudorandom sequence of numbers and a cycle-finding technique to detect factors. It's based on the birthday paradox, which suggests that in a pseudorandom sequence modulo n, collisions will occur on average after O(√p) iterations, where p is the smallest prime factor of n.
+
+#### Attack Process
+1. Define a pseudorandom function f(x) = (x² + c) mod n
+2. Generate a sequence using the recurrence relation: x_{i+1} = f(x_i)
+3. Apply Floyd's cycle-finding algorithm (tortoise and hare):
+   - Tortoise moves at one step: x = f(x)
+   - Hare moves at double speed: y = f(f(y))
+4. When a cycle is detected, compute gcd(|x - y|, n)
+5. If this GCD is not 1 or n, it's a non-trivial factor of n
+
+#### Efficiency and Performance
+- Time complexity: O(√p), where p is the smallest prime factor
+- Space complexity: O(1) - very memory efficient
+- Works best when n has relatively small factors
+
+#### Countermeasures
+- Use large prime factors of similar size in RSA key generation
+- Verify that factors are sufficiently large during key generation
+- Use modern key generation practices with proper primality testing
+
+## 2. AES-CBC Padding Oracle Attack
+
+### Overview
+The Padding Oracle attack exploits vulnerabilities in the way decryption errors are handled in systems using block ciphers with padding (like AES in CBC mode). It was first described by Serge Vaudenay in 2002.
+
+### Technical Background
+- **Block Ciphers**: AES operates on fixed-size blocks (16 bytes/128 bits)
+- **Cipher Block Chaining (CBC)**: Each plaintext block is XORed with the previous ciphertext block before encryption
+- **PKCS#7 Padding**: Adds bytes to make the message length a multiple of the block size
+
+### Attack Process
+1. **Setup**: Attacker has a valid ciphertext and access to a "padding oracle" (a system that reveals whether decryption produced valid padding)
+2. **Block Isolation**: Work with one block at a time, starting from the last block
+3. **Byte Discovery**:
+   - Modify a byte in the previous block and observe the oracle's response
+   - When the padding is valid (e.g., the last byte decrypts to 0x01), the attacker can determine the intermediate value
+   - Calculate the original plaintext byte using: P' = I ⊕ C'[previous block]
+4. **Iteration**: Repeat for each byte in the block, working backward
+5. **Block Completion**: Move to the previous block and repeat until the entire message is decrypted
+
+### Vulnerability Requirements
+- A system that acts as a padding oracle (reveals if padding is valid)
+- Attacker must have a valid ciphertext
+- No integrity protection (like HMAC)
+
+### Countermeasures
+- Use authenticated encryption modes (GCM, CCM, EAX)
+- Implement constant-time padding verification
+- Return the same error regardless of padding validity
+- Add message authentication codes (HMAC) to verify integrity before checking padding
+
+## 3. Vigenère Cipher Attacks
+
+### 3.1. Kasiski Examination
+
+#### Overview
+The Kasiski examination is a method for breaking polyalphabetic substitution ciphers, particularly the Vigenère cipher. It was published by Friedrich Kasiski in 1863 and exploits repeated sequences in the ciphertext to determine the key length.
+
+#### Attack Process
+1. **Finding Repeated Sequences**:
+   - Scan the ciphertext for repeated fragments (typically 3+ characters long)
+   - Record positions of all repetitions
+   
+2. **Key Length Determination**:
+   - Calculate the distances between repeated sequences
+   - Find the greatest common divisor (GCD) of these distances
+   - The GCD (or factors of it) likely corresponds to the key length
+   
+3. **Key Recovery**:
+   - Once key length (k) is determined, separate ciphertext into k groups
+   - Each group is essentially a Caesar cipher (shift cipher)
+   - Apply frequency analysis on each group to determine the shift
+   
+4. **Frequency Analysis**:
+   - In English text, 'E' is the most common letter (~12%)
+   - Other frequent letters are T, A, O, I, N
+   - Compare observed frequencies with expected frequencies to determine shifts
+
+#### Effectiveness
+- Works very well on longer messages (200+ characters)
+- Requires sufficient repeated sequences
+- Success depends on language patterns matching expected frequencies
+
+#### Countermeasures
+- Use truly random one-time pads instead of repeating keys
+- Employ modern encryption algorithms
+- Increase key length to reduce repeated patterns
+- Use multiple substitution alphabets with more complex patterns
+
+### 3.2. Index of Coincidence Method
+
+#### Overview
+The Index of Coincidence (IoC) provides a measure of the relative frequency of letters in a ciphertext and can be used to determine the key length of a Vigenère cipher without requiring repeated sequences.
+
+#### Mathematical Foundation
+The IoC is defined as the probability that two randomly selected letters from a text are the same:
+   IC = Σ(n_i × (n_i - 1)) / (N × (N - 1))
+   
+Where:
+- n_i is the frequency of each letter
+- N is the total number of letters
+
+For random text, the IoC is around 0.038
+For English text, the IoC is typically around 0.067
+
+#### Attack Process
+1. **Calculate IoC for Different Key Lengths**:
+   - For each potential key length k, divide ciphertext into k columns
+   - Calculate the IoC for each column
+   - Average these values to get the IoC for that key length
+   
+2. **Identify Correct Key Length**:
+   - The key length that produces an IoC closest to that of the plaintext language (e.g., 0.067 for English) is likely correct
+   
+3. **Key Recovery**:
+   - Apply frequency analysis to each column
+   - Determine the shift that creates a distribution most similar to the expected language
+
+#### Advantages
+- Works even when there are no repeated sequences
+- Generally requires less text than Kasiski examination
+- More reliable for shorter messages
+
+#### Limitations
+- Less effective with short ciphertexts
+- Can be ambiguous when multiple key lengths give similar IoC values
+- Assumes the plaintext is in a known language with known letter frequencies
+
+## 4. Practical Considerations for Cryptographic Security
+
+### Key Management
+- Store keys securely, preferably in specialized hardware
+- Implement proper key rotation policies
+- Use different keys for different purposes
+- Apply the principle of least privilege
+
+### Implementation Security
+- Avoid timing attacks by using constant-time operations
+- Protect against side-channel attacks
+- Securely erase sensitive data from memory
+- Use established libraries rather than custom implementations
+
+### System Design Principles
+- Defense in depth - multiple layers of security
+- Fail securely - errors should not compromise security
+- Least privilege - minimize access rights
+- Keep security simple - complex systems are harder to secure
+
+### Modern Recommended Practices
+- Use authenticated encryption (AEAD modes)
+- Implement forward secrecy when possible
+- Follow standardized protocols (TLS 1.3, etc.)
+- Keep cryptographic systems up to date
+- Perform regular security audits
+
+## 5. Educational Purpose Statement
+
+The attacks implemented in this tool are presented for educational purposes only. They demonstrate important cryptographic concepts and illustrate why certain practices are no longer recommended. Understanding these vulnerabilities helps developers and security professionals build more secure systems.
+
+In practice, modern cryptographic libraries implement numerous countermeasures against these attacks. Always use current, well-reviewed cryptographic libraries and follow best practices when implementing security-sensitive code.

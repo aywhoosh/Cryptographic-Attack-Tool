@@ -1,5 +1,7 @@
 import os
 import time
+import threading
+from queue import Queue
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 from Crypto.Random import get_random_bytes
@@ -9,196 +11,223 @@ def aes_attack(ciphertext, padding_oracle, iv, block_size=16, visual_callback=No
     Implement AES-CBC Padding Oracle attack.
     
     Args:
-        ciphertext: The encrypted data to decrypt
-        padding_oracle: A function that returns True if the padding is valid
-        iv: Initialization vector
-        block_size: Block size in bytes (default 16)
-        visual_callback: Function to call with step-by-step visualization info
+        ciphertext (bytes): The encrypted data to decrypt.
+        padding_oracle (function): Function that returns True if the padding is valid.
+        iv (bytes): Initialization vector.
+        block_size (int): Block size in bytes (default 16).
+        visual_callback (function): Callback for step-by-step visualization.
     
     Returns:
-        The decrypted plaintext if the attack is successful, None otherwise
+        The decrypted plaintext if successful, or None.
     """
-    if len(ciphertext) % block_size != 0:
-        return None
+    # Ensure the ciphertext is properly padded
+    if len(ciphertext) % 16 != 0:  # AES always requires 16-byte blocks
+        padded_size = ((len(ciphertext) // 16) + 1) * 16
+        ciphertext = pad(ciphertext, 16)
     
-    # Split the ciphertext into blocks
-    blocks = [iv]
-    for i in range(0, len(ciphertext), block_size):
-        blocks.append(ciphertext[i:i + block_size])
+    # Split ciphertext into blocks
+    blocks = [ciphertext[i:i+block_size] for i in range(0, len(ciphertext), block_size)]
     
-    recovered_blocks = []
-    total_blocks = len(blocks) - 1
+    # Add IV as block[0] to make indexing easier
+    blocks.insert(0, iv)
+    total_blocks = len(blocks) - 1  # Actual ciphertext blocks (excluding IV)
     
-    # Process all blocks except the IV (which is blocks[0])
-    for block_idx in range(total_blocks):
-        current_block_idx = block_idx + 1
-        prev_block_idx = block_idx
-        
-        if visual_callback:
-            visual_callback(current_block_idx, None, None, None, "block_start", 
-                            f"Starting attack on block {current_block_idx}/{total_blocks}")
-        
-        # This will store the intermediate bytes I (where I = D(C))
-        intermediate_bytes = bytearray(block_size)
-        recovered_bytes = bytearray(block_size)
-        
-        # Start from the last byte of the block and move backward
-        for pad_position in range(1, block_size + 1):
-            byte_position = block_size - pad_position
+    # Store recovered plaintext blocks
+    plaintext_blocks = []
+    
+    # Create a queue for thread-safe communication
+    result_queue = Queue()
+    stop_event = threading.Event()
+
+    def process_block(current_block_idx):
+        try:
+            target_block = blocks[current_block_idx]      # Block we're trying to decrypt
+            previous_block = bytearray(blocks[current_block_idx-1])  # Block used for manipulation
             
             if visual_callback:
-                visual_callback(current_block_idx, byte_position, None, None, "byte_start", 
-                                f"Attempting to recover byte {pad_position} using padding {pad_position}")
+                visual_callback(current_block_idx, None, None, None, "block_start",
+                              f"Starting attack on block {current_block_idx}/{total_blocks}")
             
-            # Prepare the test block - we'll modify prev_block to get valid padding
-            test_block = bytearray(blocks[prev_block_idx])
-            current_block = blocks[current_block_idx]
+            # Store intermediate state and recovered plaintext for this block
+            intermediate_bytes = bytearray(block_size)
+            plaintext_bytes = bytearray(block_size)
             
-            # Set up bytes for padding
-            for i in range(1, pad_position):
-                # XOR with the known intermediate byte and the desired padding value
-                test_block[block_size - i] = test_block[block_size - i] ^ intermediate_bytes[block_size - i] ^ pad_position
-            
-            # Try all possible values for the unknown byte
-            found = False
-            for test_value in range(256):
-                # Use a separate array to avoid modifying the original test_block
-                modified_block = bytearray(test_block)
-                modified_block[byte_position] = test_block[byte_position] ^ test_value
-                
-                # Update visualization
-                if visual_callback:
-                    visual_callback(current_block_idx, byte_position, None, None, "testing", 
-                                    f"Testing byte {pad_position} with value {test_value}", test_value)
-                
-                # Create test cipher (modified block + current block)
-                test_cipher = bytes(modified_block) + bytes(current_block)
-                
-                # Check if this gives valid padding
-                if padding_oracle(test_cipher):
-                    # For first byte (pad_position=1), we need to double-check to avoid false positives
-                    if pad_position == 1:
-                        # Change the second-to-last byte and test again
-                        if byte_position > 0:  # Ensure there is a previous byte
-                            double_check = bytearray(modified_block)
-                            double_check[byte_position - 1] ^= 1  # Flip any bit in the previous byte
-                            test_cipher = bytes(double_check) + bytes(current_block)
-                            
-                            # If padding is still valid, it might be a false positive - check another value
-                            if padding_oracle(test_cipher):
-                                continue
-                    
-                    # Calculate the intermediate byte (I = P' XOR C')
-                    intermediate_byte = test_value ^ pad_position
-                    intermediate_bytes[byte_position] = intermediate_byte
-                    
-                    # Calculate the plaintext byte (P = I XOR C_prev)
-                    plaintext_byte = intermediate_byte ^ blocks[prev_block_idx][byte_position]
-                    recovered_bytes[byte_position] = plaintext_byte
-                    
-                    # Display the recovered byte
-                    char_repr = chr(plaintext_byte) if 32 <= plaintext_byte <= 126 else '?'
-                    if visual_callback:
-                        visual_callback(current_block_idx, byte_position, plaintext_byte, intermediate_byte, "found", 
-                                        f"Found byte {pad_position}: {char_repr} (value: {plaintext_byte}, intermediate: {intermediate_byte})")
-                    
-                    found = True
-                    break
-            
-            # If we couldn't find a valid value, try a fallback approach
-            if not found:
-                # For the last byte, try explicit padding values (common issue)
-                if pad_position == 1:
-                    # Try all padding values explicitly
-                    for test_padding in range(1, block_size + 1):
-                        # Calculate the intermediate byte assuming padding value
-                        test_intermediate = test_block[byte_position] ^ test_padding
-                        # Calculate plaintext byte
-                        test_plaintext = test_intermediate ^ blocks[prev_block_idx][byte_position]
-                        
-                        # Store these values for now - we'll validate later if possible
-                        intermediate_bytes[byte_position] = test_intermediate
-                        recovered_bytes[byte_position] = test_plaintext
-                        
-                        if visual_callback:
-                            visual_callback(current_block_idx, byte_position, test_plaintext, test_intermediate, "failed", 
-                                            f"Using fallback for byte {pad_position}: trying padding value {test_padding}")
-                        
-                        found = True
-                        break
-                
-                if not found:
-                    if visual_callback:
-                        visual_callback(current_block_idx, byte_position, None, None, "failed", 
-                                        f"Failed to find byte {pad_position}")
-                    # If we can't recover a byte, we can't continue with this block
+            # Work backwards through the bytes
+            for padding_byte in range(1, block_size + 1):
+                if stop_event.is_set():
                     return None
-        
-        recovered_blocks.append(bytes(recovered_bytes))
-        
-        if visual_callback:
-            visual_callback(current_block_idx, None, None, None, "complete", 
-                            f"Completed block {current_block_idx}/{total_blocks}: {recovered_blocks[-1].hex()}")
-    
-    # Combine all recovered blocks
-    plaintext = b''.join(recovered_blocks)
-    
-    # Try to remove padding
-    try:
-        # The recovered plaintext might already have PKCS#7 padding
-        # Let's try to remove it
-        return plaintext
-    except ValueError:
-        # If the padding is invalid, return the raw recovered data
-        return plaintext
+                    
+                byte_pos = block_size - padding_byte  # Current byte position (0-indexed from start of block)
+                
+                if visual_callback:
+                    visual_callback(current_block_idx, byte_pos, None, None, "byte_start",
+                                  f"Recovering byte {padding_byte} with padding {padding_byte}")
+                
+                # Create test block based on previous block
+                test_block = bytearray(previous_block)
+                
+                # Set padding for already-discovered bytes
+                for i in range(byte_pos + 1, block_size):
+                    test_block[i] = test_block[i] ^ intermediate_bytes[i] ^ padding_byte
+                
+                # Test all possible values for the current byte
+                found = False
+                candidate_values = []
+                
+                # First pass: collect all candidate values
+                for test_byte in range(256):
+                    if stop_event.is_set():
+                        return None
+                        
+                    # Set the byte we're attacking
+                    test_block[byte_pos] = test_block[byte_pos] ^ test_byte
+                    
+                    if visual_callback:
+                        visual_callback(current_block_idx, byte_pos, None, None, "testing",
+                                      f"Testing byte value {test_byte} at pad {padding_byte}", test_byte)
+                    
+                    # Check if padding is valid
+                    test_input = bytes(test_block) + target_block
+                    if padding_oracle(test_input):
+                        candidate_values.append(test_byte)
+                    
+                    # Reset the byte for next test
+                    test_block[byte_pos] = previous_block[byte_pos]
+                
+                # Process candidates and verify results
+                if candidate_values:
+                    if padding_byte == 1:
+                        # Additional verification for padding=1
+                        verified_values = []
+                        for candidate in candidate_values:
+                            if stop_event.is_set():
+                                return None
+                                
+                            test_block[byte_pos] = test_block[byte_pos] ^ candidate
+                            valid = True
+                            
+                            # Try invalidating the padding by modifying previous byte
+                            if byte_pos > 0:
+                                verifier = bytearray(test_block)
+                                verifier[byte_pos-1] ^= 0xFF
+                                if padding_oracle(bytes(verifier) + target_block):
+                                    valid = False
+                            
+                            if valid:
+                                verified_values.append(candidate)
+                            test_block[byte_pos] = previous_block[byte_pos]
+                        
+                        if verified_values:
+                            test_byte = verified_values[0]
+                            found = True
+                        elif candidate_values:
+                            test_byte = candidate_values[0]
+                            found = True
+                    else:
+                        test_byte = candidate_values[0]
+                        found = True
+                
+                if found:
+                    intermediate_byte = test_byte ^ padding_byte
+                    intermediate_bytes[byte_pos] = intermediate_byte
+                    plaintext_byte = intermediate_byte ^ previous_block[byte_pos]
+                    plaintext_bytes[byte_pos] = plaintext_byte
+                    
+                    if visual_callback:
+                        char_repr = chr(plaintext_byte) if 32 <= plaintext_byte <= 126 else '?'
+                        visual_callback(current_block_idx, byte_pos, plaintext_byte, intermediate_byte, "found",
+                                      f"Found byte {padding_byte}: {char_repr} (value: {plaintext_byte})")
+            
+            # Block completed
+            result_queue.put((current_block_idx, bytes(plaintext_bytes)))
+            if visual_callback:
+                visual_callback(current_block_idx, None, None, None, "complete",
+                              f"Completed block {current_block_idx}/{total_blocks}")
+                              
+        except Exception as e:
+            result_queue.put((current_block_idx, None, str(e)))
 
-def demonstrate_aes_attack(plaintext, block_size=16, visual_callback=None):
+    # Process blocks in separate threads
+    threads = []
+    for current_block_idx in range(1, len(blocks)):
+        if stop_event.is_set():
+            break
+        
+        thread = threading.Thread(target=process_block, args=(current_block_idx,))
+        thread.daemon = True  # Make thread daemon so it exits when main thread exits
+        threads.append(thread)
+        thread.start()
+    
+    # Wait for all threads to complete
+    results = []
+    try:
+        # Collect results from queue
+        for _ in range(len(threads)):
+            result = result_queue.get()
+            results.append(result)
+            result_queue.task_done()
+            
+        # Wait for threads to finish
+        for thread in threads:
+            thread.join(timeout=0.1)  # Short timeout to allow for cancellation
+            
+    except Exception as e:
+        stop_event.set()  # Signal threads to stop
+        raise e
+    
+    # Sort results by block index and combine
+    results.sort(key=lambda x: x[0])
+    plaintext_blocks = [result[1] for result in results if result[1] is not None]
+    
+    if len(plaintext_blocks) != total_blocks:
+        return None
+        
+    # Combine all blocks
+    plaintext = b''.join(plaintext_blocks)
+    return plaintext
+
+def demonstrate_aes_attack(plaintext_bytes, block_size=16, visual_callback=None):
     """
-    Demonstrate the AES-CBC padding oracle attack by:
-    1. Encrypting a provided plaintext
-    2. Setting up a padding oracle
-    3. Running the attack against the ciphertext
-    4. Comparing the recovered plaintext with the original
+    Demonstrate the AES-CBC padding oracle attack with proper padding and threading support.
     
     Args:
-        plaintext: The plaintext to encrypt and then recover
-        block_size: Block size in bytes (default 16)
-        visual_callback: Function to call with step-by-step visualization info
+        plaintext_bytes (bytes): Plaintext to encrypt.
+        block_size (int): Block size in bytes.
+        visual_callback (function): Callback for visualization.
     
     Returns:
-        Tuple (original_plaintext, recovered_plaintext, encryption_time, attack_time)
+        Tuple (original_plaintext, recovered_plaintext, encryption_time, attack_time).
     """
-    # Generate random key and IV for this demonstration
-    key = get_random_bytes(block_size)
-    iv = get_random_bytes(block_size)
+    # Ensure the plaintext is properly padded for AES
+    padded_plaintext = pad(plaintext_bytes, 16)  # Always pad to 16 bytes for AES
     
-    # Encrypt the plaintext
+    # Generate key and IV
+    key = get_random_bytes(16)  # AES requires 16-byte key
+    iv = get_random_bytes(16)   # AES requires 16-byte IV
+    
     start_time = time.time()
-    padded_plaintext = pad(plaintext, block_size)
     cipher = AES.new(key, AES.MODE_CBC, iv)
     ciphertext = cipher.encrypt(padded_plaintext)
     encrypt_time = time.time() - start_time
     
-    # Define padding oracle for the demo
     def padding_oracle(test_data):
+        """Thread-safe padding oracle"""
         try:
             time.sleep(0.005)  # Simulate network delay
             cipher = AES.new(key, AES.MODE_CBC, iv)
-            _ = unpad(cipher.decrypt(test_data), block_size)
+            _ = unpad(cipher.decrypt(test_data), block_size)  # Use provided block_size instead of hardcoded 16
             return True
         except ValueError:
             return False
     
-    # Run the attack
     start_time = time.time()
     recovered = aes_attack(ciphertext, padding_oracle, iv, block_size, visual_callback)
     attack_time = time.time() - start_time
     
-    # If recovered data has padding, remove it
     if recovered:
         try:
-            recovered = unpad(recovered, block_size)
+            recovered = unpad(recovered, block_size)  # Use provided block_size instead of hardcoded 16
         except ValueError:
-            pass  # Keep the recovered data as is if unpadding fails
+            pass  # Return the raw recovered data if unpadding fails
     
-    return plaintext, recovered, encrypt_time, attack_time
+    return plaintext_bytes, recovered, encrypt_time, attack_time

@@ -59,14 +59,15 @@ def pollard_rho(n, max_iterations=100000, callback=None):
             # Check if we found a factor
             d = gcd(abs(x - y), n)
             
-            # Periodically report progress
+            # Report progress periodically via callback
             if callback and iterations % 100 == 0:
                 callback("progress", {
                     "iteration": iterations,
                     "tortoise": x,
                     "hare": y,
                     "gcd": d,
-                    "c": c
+                    "c": c,
+                    "n": n
                 })
             
             iterations += 1
@@ -226,11 +227,16 @@ def generate_example():
     Returns:
         Tuple (composite_number, factors).
     """
+    # Generate a small prime for easier demonstration
     p = random.randint(100, 10000)
     while not is_prime(p):
         p = random.randint(100, 10000)
+    
+    # Generate another small prime for the product
     q = random.randint(100, 10000)
     while not is_prime(q) or p == q:
         q = random.randint(100, 10000)
+    
+    # Create a composite number with small factors for better visualization
     n = p * q
     return n, [p, q]
